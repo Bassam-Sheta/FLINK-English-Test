@@ -1,155 +1,508 @@
-/** === Apps Script: serve the test + log results to this Sheet === */
-const SHEET_NAME = 'English test results';
-
-/** Serves the test UI (HTML + JS) and allows embedding in an iframe (Sites). */
-function doGet() {
-  const html = HtmlService.createHtmlOutput(getTestHtml())
-    .setTitle('B2–C1 Business English Test')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);  // allow embed in Sites
-  return html;
-}
-
-/** Receives JSON from the test and appends to the bound Sheet. */
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
-    const ss = SpreadsheetApp.getActiveSpreadsheet();                // bound to this Sheet
-    const sh = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
-    if (sh.getLastRow() === 0) {
-      sh.appendRow(['Timestamp','Name','Duration(min)','Total Items','Score','Percent','Reading','Vocabulary','Grammar']);
-    }
-    const sec = data.section_scores || {};
-    sh.appendRow([new Date(), data.name||'', data.duration_minutes||'', data.total_items||'', data.score||'', data.percent||'', sec.Reading||'', sec.Vocabulary||'', sec.Grammar||'']);
-    return ContentService.createTextOutput(JSON.stringify({status:'ok'})).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({status:'error', message:String(err)})).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-/** The full HTML for the test (25 MCQs), posts back to this same web app. */
-function getTestHtml() {
-  // NOTE: This is your v3 test, but the POST target points to this web app automatically.
-  // If you want, I can send a version with randomized choices / locked 15:00 timer.
-  const selfUrl = ScriptApp.getService().getUrl(); // this web app’s /exec URL
-  return `
-<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>B2–C1 Business English Test</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B2–C1 Business English Test (25 MCQs)</title>
+<meta name="description" content="Self-contained Business English test (B2–C1). 25 multiple-choice questions. Timer, navigation, auto-scoring, CSV export, and Google Sheets logging via Apps Script.">
 <style>
-  /* (Readable 19px UI, same look & feel) */
-  :root{--bg:#0b1220;--card:#10192c;--ink:#f4f7ff;--muted:#a9bad6;--accent:#4da3ff;--accent-2:#3bd1c7;--danger:#ff6b6b;--ok:#2fd27b;--border:#22314f;--focus:#89c2ff}
-  html,body{height:100%} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";font-size:19px;line-height:1.65;letter-spacing:.2px;background:radial-gradient(1200px 800px at 80% -20%,#1a2b4f 0%,transparent 70%),var(--bg);color:var(--ink)}
-  .wrap{max-width:980px;margin:24px auto;padding:0 16px 40px} header{display:flex;gap:16px;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap}
-  .title h1{margin:0 0 6px 0;font-weight:800;letter-spacing:.3px}.title p{margin:2px 0 0 0;color:var(--muted)}
-  .timer{margin-left:auto;text-align:right;min-width:220px} #time{font-variant-numeric:tabular-nums;font-weight:800;font-size:1.5rem;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid var(--border);border-radius:16px;padding:18px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-  .progress{height:12px;background:#0d1729;border:1px solid var(--border);border-radius:999px;overflow:hidden;margin:10px 0 18px}.bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .35s ease}
-  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px} button{appearance:none;border:none;cursor:pointer;padding:12px 16px;border-radius:12px;font-weight:800;color:#0b1220;background:var(--accent);font-size:17px}
-  button.secondary{background:#233656;color:var(--ink);border:1px solid var(--border)} button.ghost{background:transparent;color:var(--muted);border:1px dashed var(--border)}
-  button.ok{background:var(--ok);color:#062111} button[disabled]{opacity:.6;cursor:not-allowed}
-  fieldset{border:none;margin:0;padding:0} legend{font-weight:800;margin:8px 0 10px}
-  .q{padding:14px;margin:10px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)} .q label{display:block;margin:9px 0;cursor:pointer}
-  .muted{color:var(--muted)} .hidden{display:none!important} .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.9rem;background:#13223a;border:1px solid var(--border);color:var(--muted)}
-  .grid{display:grid;gap:14px}@media(min-width:900px){.grid.two{grid-template-columns:1fr 1fr}} input[type=text]{width:min(520px,100%);padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0e1a30;color:var(--ink);font-size:19px;outline:none}
-  input[type=text]:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(77,163,255,.25)}
+  :root{
+    --bg:#0b1220;
+    --card:#10192c;
+    --ink:#f4f7ff;
+    --muted:#a9bad6;
+    --accent:#4da3ff;
+    --accent-2:#3bd1c7;
+    --danger:#ff6b6b;
+    --ok:#2fd27b;
+    --border:#22314f;
+    --focus:#89c2ff;
+  }
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    font-size: 19px; /* larger for readability */
+    line-height: 1.65;
+    letter-spacing:.2px;
+    background: radial-gradient(1200px 800px at 80% -20%, #1a2b4f 0%, transparent 70%), var(--bg);
+    color: var(--ink);
+  }
+  .wrap{max-width: 980px; margin: 24px auto; padding: 0 16px 40px;}
+  header{display:flex; gap:16px; align-items:flex-start; margin-bottom: 12px; flex-wrap: wrap;}
+  .title h1{margin:0 0 6px 0; font-weight:800; letter-spacing:.3px;}
+  .title p{margin:2px 0 0 0; color:var(--muted);}
+  .timer{ margin-left:auto; text-align:right; min-width: 220px; }
+  #time{
+    font-variant-numeric: tabular-nums;
+    font-weight:800; font-size:1.5rem;
+    background:linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .card{
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.0));
+    border:1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  .progress{height:12px; background:#0d1729; border:1px solid var(--border); border-radius:999px; overflow:hidden; margin: 10px 0 18px;}
+  .bar{height:100%; width:0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .35s ease;}
+  .controls{display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;}
+  button{
+    appearance:none; border:none; cursor:pointer;
+    padding:12px 16px; border-radius: 12px; font-weight:800;
+    color:#0b1220; background:var(--accent);
+    font-size: 17px;
+  }
+  button.secondary{ background:#233656; color:var(--ink); border:1px solid var(--border); }
+  button.ghost{ background:transparent; color: var(--muted); border:1px dashed var(--border); }
+  button.danger{ background: var(--danger); color:white;}
+  button.ok{ background: var(--ok); color:#062111;}
+  button[disabled]{ opacity:.6; cursor:not-allowed; }
+  fieldset{border:none; margin:0; padding:0;}
+  legend{font-weight:800; margin: 8px 0 10px;}
+  .q{ padding:14px; margin:10px 0; border:1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.02);}
+  .q label{ display:block; margin: 9px 0; cursor:pointer;}
+  .muted{ color: var(--muted); }
+  .hidden{ display:none !important; }
+  .note{ font-size:1rem; color: var(--muted); }
+  .pill{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.9rem; background:#13223a; border:1px solid var(--border); color:var(--muted); }
+  .result-good{ color: var(--ok); }
+  .result-bad{ color: var(--danger); }
+  .grid{ display:grid; gap:14px; }
+  @media(min-width:900px){ .grid.two{ grid-template-columns: 1fr 1fr; } }
+  .footer-note{ margin-top:14px; font-size:.95rem; color: var(--muted);}
+  .kbd{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:.95rem; color:#dfe9ff; }
+  input[type="text"]{
+    width: min(520px, 100%);
+    padding: 10px 12px; border-radius: 10px;
+    border:1px solid var(--border); background:#0e1a30; color: var(--ink); font-size: 19px;
+    outline:none;
+  }
+  input[type="text"]:focus{ border-color: var(--focus); box-shadow: 0 0 0 3px rgba(77,163,255,.25); }
+  .small{ font-size:.95rem; color:var(--muted); }
 </style>
-</head><body>
-<div class="wrap">
-  <header>
-    <div class="title"><h1>B2–C1 Business English Test</h1><p>25 MCQs • 15–20 minutes</p></div>
-    <div class="timer card"><div class="pill">Timer</div><div id="time">20:00</div>
-      <div class="controls" style="margin-top:8px;"><button class="ghost" id="toggle-15">15:00</button><button class="ghost" id="toggle-20">20:00</button></div>
-    </div>
-  </header>
-  <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">
+        <h1>B2–C1 Business English Test</h1>
+        <p>Business-general English • 25 multiple-choice questions • 15–20 minutes</p>
+      </div>
+      <div class="timer card">
+        <div class="pill" id="timer-label">Timer</div>
+        <div id="time">20:00</div>
+        <div class="controls" style="margin-top:8px;">
+          <button class="ghost" id="toggle-15" title="Set 15 minutes">15:00</button>
+          <button class="ghost" id="toggle-20" title="Set 20 minutes">20:00</button>
+        </div>
+      </div>
+    </header>
 
-  <!-- Intro / Name -->
-  <section id="page-intro" class="card">
-    <h2>Before you begin</h2>
-    <p>Enter your full name, then click <strong>Begin</strong>.</p>
-    <input id="candidate-name" type="text" placeholder="Full name" autocomplete="name" required>
-    <div class="controls"><button id="begin" disabled>Begin</button></div>
-  </section>
+    <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
 
-  <!-- Page 1/2/3: (same 25 MCQs as your v3 build) -->
-  <!-- I’m keeping the content identical to your last version to avoid surprises. -->
-  <!-- … (omitted here for brevity — I can paste the full 25 Qs if you want it inline) … -->
+    <!-- Intro / Name Gate -->
+    <section id="page-intro" class="card">
+      <h2>Before you begin</h2>
+      <p>Please enter your full name. The test will start once you click <strong>Begin</strong>.</p>
+      <label for="candidate-name" class="small">Full name</label><br>
+      <input id="candidate-name" type="text" placeholder="e.g., Waseem Arsany" autocomplete="name" required>
+      <p class="note">Your name is used on the result report and sent to the designated Google Sheet (if enabled).</p>
+      <div class="controls">
+        <button id="begin" disabled>Begin</button>
+      </div>
+    </section>
 
-  <!-- Results -->
-  <section id="page-results" class="card hidden">
-    <h2>Results</h2>
-    <p><strong>Name:</strong> <span id="r-name"></span></p>
-    <p><strong>Total:</strong> <span id="score"></span> / 25 (<span id="percent"></span>%)</p>
-    <div id="by-section"></div>
-    <div class="controls"><button class="ghost" id="restart">Restart</button></div>
-  </section>
-</div>
+    <!-- Page 1: Reading (9) -->
+    <section id="page-1" class="card hidden">
+      <h2>Part 1 — Reading (9 questions)</h2>
+      <p class="muted">Read the texts and choose the best option (A–D) for each question.</p>
+
+      <article class="q" style="line-height:1.65">
+        <strong>Text A — “A New Approach to Flexible Work”</strong><br>
+        After a year of uneven productivity and rising office costs, HelioLabs piloted a <em>team-first hybrid</em> model. 
+        Project squads negotiated two anchor days in the office to plan, build rapport and handle sensitive work, while deep-focus tasks moved online with clearer norms: 
+        shared calendars, meeting-free blocks, and mandatory summaries. 
+        Contrary to senior leaders’ fears, cycle times improved by 11%, voluntary attrition fell, and client satisfaction in Q2 reached a three-year high. 
+        Still, leaders warned against complacency: onboarding needed more structure, managers required coaching to prevent proximity bias, and 
+        the facilities budget had to shift from desks to collaboration zones. The board has asked for a six-month review before funding expansion.
+      </article>
+
+      <fieldset class="grid">
+        <div class="q">
+          <legend>1) What was the <em>main</em> reason HelioLabs changed its work model?</legend>
+          <label><input type="radio" name="q1" value="A"> To reduce the number of meetings company-wide</label>
+          <label><input type="radio" name="q1" value="B"> To address productivity variability and high office costs</label>
+          <label><input type="radio" name="q1" value="C"> To comply with a board mandate</label>
+          <label><input type="radio" name="q1" value="D"> To boost social events after work</label>
+        </div>
+        <div class="q">
+          <legend>2) In the hybrid model, what are “anchor days” primarily for?</legend>
+          <label><input type="radio" name="q2" value="A"> Deep-focus individual work</label>
+          <label><input type="radio" name="q2" value="B"> Training new hires only</label>
+          <label><input type="radio" name="q2" value="C"> Planning, relationship-building and sensitive tasks</label>
+          <label><input type="radio" name="q2" value="D"> Performance reviews</label>
+        </div>
+        <div class="q">
+          <legend>3) Which result <em>best</em> supports continuing the model?</legend>
+          <label><input type="radio" name="q3" value="A"> Lower facilities spending</label>
+          <label><input type="radio" name="q3" value="B"> Improved cycle times and client satisfaction</label>
+          <label><input type="radio" name="q3" value="C"> Fewer vacation days taken</label>
+          <label><input type="radio" name="q3" value="D"> More internal events</label>
+        </div>
+        <div class="q">
+          <legend>4) What risk does “proximity bias” refer to in this context?</legend>
+          <label><input type="radio" name="q4" value="A"> Preferring legacy vendors over new ones</label>
+          <label><input type="radio" name="q4" value="B"> Favoring staff who are physically present more often</label>
+          <label><input type="radio" name="q4" value="C"> Scheduling meetings too close together</label>
+          <label><input type="radio" name="q4" value="D"> Sitting teams too near noisy areas</label>
+        </div>
+        <div class="q">
+          <legend>5) Which improvement still needs work to make the model sustainable?</legend>
+          <label><input type="radio" name="q5" value="A"> More collaboration zones than desks</label>
+          <label><input type="radio" name="q5" value="B"> A clearer onboarding structure and manager training</label>
+          <label><input type="radio" name="q5" value="C"> Fewer meeting-free blocks</label>
+          <label><input type="radio" name="q5" value="D"> Reducing client-facing time</label>
+        </div>
+        <div class="q">
+          <legend>6) What has the board required next?</legend>
+          <label><input type="radio" name="q6" value="A"> Immediate expansion to all teams</label>
+          <label><input type="radio" name="q6" value="B"> Return to full on-site work</label>
+          <label><input type="radio" name="q6" value="C"> A six-month review before funding further roll-out</label>
+          <label><input type="radio" name="q6" value="D"> An external audit of office leases</label>
+        </div>
+      </fieldset>
+
+      <article class="q" style="line-height:1.65">
+        <strong>Text B — Internal memo: Vendor renegotiation</strong><br>
+        To: Sourcing Leads<br>
+        From: CFO<br>
+        Subject: NovaPrint contract review<br><br>
+        Please open negotiations with NovaPrint to extend payment terms from net 30 to <em>net 45</em> and secure a <em>3% year-end rebate</em> tied to volume. 
+        Aim for a tiered pricing schedule if volumes exceed last year’s run-rate by 15%. 
+        Avoid scope creep in the print-on-demand pilot; any change requests must go through the change-control board. 
+        If we have no resolution by <em>15 July</em>, escalate to Legal for options.
+      </article>
+
+      <fieldset class="grid">
+        <div class="q">
+          <legend>7) What is the immediate target of renegotiation?</legend>
+          <label><input type="radio" name="q7" value="A"> Quarterly prepayment for supplies</label>
+          <label><input type="radio" name="q7" value="B"> Extending payment terms to 45 days with a rebate</label>
+          <label><input type="radio" name="q7" value="C"> Adding two backup vendors</label>
+          <label><input type="radio" name="q7" value="D"> Cancelling the contract</label>
+        </div>
+        <div class="q">
+          <legend>8) Which risk should the team avoid?</legend>
+          <label><input type="radio" name="q8" value="A"> Over-ordering inventory</label>
+          <label><input type="radio" name="q8" value="B"> Scope creep in the pilot</label>
+          <label><input type="radio" name="q8" value="C"> Price volatility</label>
+          <label><input type="radio" name="q8" value="D"> Seasonal demand spikes</label>
+        </div>
+        <div class="q">
+          <legend>9) When should the matter be escalated to Legal?</legend>
+          <label><input type="radio" name="q9" value="A"> 15 June</label>
+          <label><input type="radio" name="q9" value="B"> 1 July</label>
+          <label><input type="radio" name="q9" value="C"> 15 July</label>
+          <label><input type="radio" name="q9" value="D"> 31 July</label>
+        </div>
+      </fieldset>
+
+      <div class="controls">
+        <button class="secondary" data-prev>Previous</button>
+        <button data-next>Next</button>
+      </div>
+    </section>
+
+    <!-- Page 2: Vocabulary / Use of English (8) -->
+    <section id="page-2" class="card hidden">
+      <h2>Part 2 — Vocabulary / Use of English (8 questions)</h2>
+      <p class="muted">Choose the best option (A–D).</p>
+      <fieldset class="grid two">
+        <div class="q">
+          <legend>10) We will ___ the new CRM across EMEA next quarter.</legend>
+          <label><input type="radio" name="q10" value="A"> roll out</label>
+          <label><input type="radio" name="q10" value="B"> roll on</label>
+          <label><input type="radio" name="q10" value="C"> roll off</label>
+          <label><input type="radio" name="q10" value="D"> roll over</label>
+        </div>
+        <div class="q">
+          <legend>11) The proposal is not ___ with our compliance policy.</legend>
+          <label><input type="radio" name="q11" value="A"> attuned</label>
+          <label><input type="radio" name="q11" value="B"> aligned</label>
+          <label><input type="radio" name="q11" value="C"> adjacent</label>
+          <label><input type="radio" name="q11" value="D"> analogous</label>
+        </div>
+        <div class="q">
+          <legend>12) Let’s ___ the forecast to reflect the latest FX assumptions.</legend>
+          <label><input type="radio" name="q12" value="A"> revise</label>
+          <label><input type="radio" name="q12" value="B"> redo</label>
+          <label><input type="radio" name="q12" value="C"> reinvent</label>
+          <label><input type="radio" name="q12" value="D"> rework</label>
+        </div>
+        <div class="q">
+          <legend>13) The team is at ___ capacity during the audit.</legend>
+          <label><input type="radio" name="q13" value="A"> whole</label>
+          <label><input type="radio" name="q13" value="B"> entire</label>
+          <label><input type="radio" name="q13" value="C"> full</label>
+          <label><input type="radio" name="q13" value="D"> complete</label>
+        </div>
+        <div class="q">
+          <legend>14) She gave a very ___ summary of the key risks.</legend>
+          <label><input type="radio" name="q14" value="A"> concise</label>
+          <label><input type="radio" name="q14" value="B"> economic</label>
+          <label><input type="radio" name="q14" value="C"> little</label>
+          <label><input type="radio" name="q14" value="D"> meagre</label>
+        </div>
+        <div class="q">
+          <legend>15) We’ll ___ back the meeting to 3 p.m.</legend>
+          <label><input type="radio" name="q15" value="A"> pull</label>
+          <label><input type="radio" name="q15" value="B"> push</label>
+          <label><input type="radio" name="q15" value="C"> set</label>
+          <label><input type="radio" name="q15" value="D"> switch</label>
+        </div>
+        <div class="q">
+          <legend>16) We need to ___ on the lessons learned from the pilot.</legend>
+          <label><input type="radio" name="q16" value="A"> build</label>
+          <label><input type="radio" name="q16" value="B"> base</label>
+          <label><input type="radio" name="q16" value="C"> rely</label>
+          <label><input type="radio" name="q16" value="D"> depend</label>
+        </div>
+        <div class="q">
+          <legend>17) This feature could be a ___ changer in our segment.</legend>
+          <label><input type="radio" name="q17" value="A"> role</label>
+          <label><input type="radio" name="q17" value="B"> rule</label>
+          <label><input type="radio" name="q17" value="C"> game</label>
+          <label><input type="radio" name="q17" value="D"> pace</label>
+        </div>
+      </fieldset>
+      <div class="controls">
+        <button class="secondary" data-prev>Previous</button>
+        <button data-next>Next</button>
+      </div>
+    </section>
+
+    <!-- Page 3: Grammar (8) -->
+    <section id="page-3" class="card hidden">
+      <h2>Part 3 — Grammar (8 questions)</h2>
+      <fieldset class="grid two">
+        <div class="q">
+          <legend>18) If we ___ the pilot earlier, we would have hit the Q2 target.</legend>
+          <label><input type="radio" name="q18" value="A"> started</label>
+          <label><input type="radio" name="q18" value="B"> had started</label>
+          <label><input type="radio" name="q18" value="C"> would start</label>
+          <label><input type="radio" name="q18" value="D"> were starting</label>
+        </div>
+        <div class="q">
+          <legend>19) Hardly ___ the announcement when the site crashed.</legend>
+          <label><input type="radio" name="q19" value="A"> we had posted</label>
+          <label><input type="radio" name="q19" value="B"> had we posted</label>
+          <label><input type="radio" name="q19" value="C"> we posted</label>
+          <label><input type="radio" name="q19" value="D"> did we post</label>
+        </div>
+        <div class="q">
+          <legend>20) Each of the managers ___ signed the code of conduct.</legend>
+          <label><input type="radio" name="q20" value="A"> have</label>
+          <label><input type="radio" name="q20" value="B"> has</label>
+          <label><input type="radio" name="q20" value="C"> are</label>
+          <label><input type="radio" name="q20" value="D"> were</label>
+        </div>
+        <div class="q">
+          <legend>21) The report, ___ was circulated yesterday, outlines the risks.</legend>
+          <label><input type="radio" name="q21" value="A"> that</label>
+          <label><input type="radio" name="q21" value="B"> which</label>
+          <label><input type="radio" name="q21" value="C"> who</label>
+          <label><input type="radio" name="q21" value="D"> whose</label>
+        </div>
+        <div class="q">
+          <legend>22) By this time next year, we ___ the migration.</legend>
+          <label><input type="radio" name="q22" value="A"> will complete</label>
+          <label><input type="radio" name="q22" value="B"> will have completed</label>
+          <label><input type="radio" name="q22" value="C"> are completing</label>
+          <label><input type="radio" name="q22" value="D"> have completed</label>
+        </div>
+        <div class="q">
+          <legend>23) He suggested that the team ___ the draft again.</legend>
+          <label><input type="radio" name="q23" value="A"> reviews</label>
+          <label><input type="radio" name="q23" value="B"> review</label>
+          <label><input type="radio" name="q23" value="C"> to review</label>
+          <label><input type="radio" name="q23" value="D"> reviewed</label>
+        </div>
+        <div class="q">
+          <legend>24) No sooner ___ the demo than procurement raised concerns.</legend>
+          <label><input type="radio" name="q24" value="A"> we finished</label>
+          <label><input type="radio" name="q24" value="B"> had finished we</label>
+          <label><input type="radio" name="q24" value="C"> had we finished</label>
+          <label><input type="radio" name="q24" value="D"> did we finished</label>
+        </div>
+        <div class="q">
+          <legend>25) The CEO wants the metrics to be presented ___ a single dashboard.</legend>
+          <label><input type="radio" name="q25" value="A"> on</label>
+          <label><input type="radio" name="q25" value="B"> at</label>
+          <label><input type="radio" name="q25" value="C"> in</label>
+          <label><input type="radio" name="q25" value="D"> by</label>
+        </div>
+      </fieldset>
+      <div class="controls">
+        <button class="secondary" data-prev>Previous</button>
+        <button class="ok" id="submit">Submit</button>
+        <button class="ghost" id="reset">Reset</button>
+      </div>
+    </section>
+
+    <!-- Results Page (no answer key shown) -->
+    <section id="page-results" class="card hidden">
+      <h2>Results</h2>
+      <p><strong>Name:</strong> <span id="r-name"></span></p>
+      <p><strong>Total score:</strong> <span id="score"></span> / 25 (<span id="percent"></span>%)</p>
+      <div id="by-section"></div>
+      <div class="controls">
+        <button class="ghost" id="restart">Restart</button>
+      </div>
+      <p class="footer-note">
+        This is an auto-scored practice test covering receptive skills typical of B2–C1 business exams.
+      </p>
+    </section>
+
+    <p class="footer-note">
+      Keyboard: <span class="kbd">Alt/Option</span> + <span class="kbd">← / →</span> to move pages. Selections auto-save while the test is open.
+    </p>
+  </div>
 
 <script>
 (function(){
-  // === Config ===
-  const SHEET_WEBAPP_URL = ${JSON.stringify(selfUrl)}; // post back to this same web app
+  const SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzbmbJ_JijsV4Hh6so2yf5WdpzPspHokBV1zpaacCvXcA-kOryJLzH92LU3UEYFKUv-Qw/exec"; // your Apps Script Web App URL
 
-  // === State, questions, and UI logic are the same as your v3 build ===
-  // (Timer, pagination, scoring, etc). For brevity, I’m including only the critical bits below.
   const pages = ["page-intro","page-1","page-2","page-3","page-results"];
-  let current = 0, duration = 20*60, remaining = duration, timerId = null, candidateName = "";
+  let current = 0;
+  let candidateName = "";
+  let started = false;
+
+  const answers = {
+    q1:"B", q2:"C", q3:"B", q4:"B", q5:"B", q6:"C", q7:"B", q8:"B", q9:"C",
+    q10:"A", q11:"B", q12:"A", q13:"C", q14:"A", q15:"B", q16:"A", q17:"C",
+    q18:"B", q19:"B", q20:"B", q21:"B", q22:"B", q23:"B", q24:"C", q25:"C"
+  };
+  const sectionOf = {
+    q1:"Reading", q2:"Reading", q3:"Reading", q4:"Reading", q5:"Reading", q6:"Reading", q7:"Reading", q8:"Reading", q9:"Reading",
+    q10:"Vocabulary", q11:"Vocabulary", q12:"Vocabulary", q13:"Vocabulary", q14:"Vocabulary", q15:"Vocabulary", q16:"Vocabulary", q17:"Vocabulary",
+    q18:"Grammar", q19:"Grammar", q20:"Grammar", q21:"Grammar", q22:"Grammar", q23:"Grammar", q24:"Grammar", q25:"Grammar"
+  };
   const sectionTotals = {Reading:9, Vocabulary:8, Grammar:8};
-  const answers = { q1:"B",q2:"C",q3:"B",q4:"B",q5:"B",q6:"C",q7:"B",q8:"B",q9:"C", q10:"A",q11:"B",q12:"A",q13:"C",q14:"A",q15:"B",q16:"A",q17:"C", q18:"B",q19:"B",q20:"B",q21:"B",q22:"B",q23:"B",q24:"C",q25:"C" };
-  const sectionOf = { q1:"Reading",q2:"Reading",q3:"Reading",q4:"Reading",q5:"Reading",q6:"Reading",q7:"Reading",q8:"Reading",q9:"Reading",
-                      q10:"Vocabulary",q11:"Vocabulary",q12:"Vocabulary",q13:"Vocabulary",q14:"Vocabulary",q15:"Vocabulary",q16:"Vocabulary",q17:"Vocabulary",
-                      q18:"Grammar",q19:"Grammar",q20:"Grammar",q21:"Grammar",q22:"Grammar",q23:"Grammar",q24:"Grammar",q25:"Grammar" };
 
-  const timeEl=document.getElementById("time"); const bar=document.getElementById("bar");
-  function show(i){ pages.forEach((id,idx)=>document.getElementById(id)?.classList.toggle("hidden",idx!==i)); current=i; bar.style.width=(current/(pages.length-1))*100+"%"; window.scrollTo({top:0,behavior:"smooth"}); }
-  function format(s){const m=String(Math.floor(s/60)).padStart(2,"0"),sec=String(s%60).padStart(2,"0"); return m+":"+sec;}
-  function tick(){ remaining--; timeEl.textContent=format(remaining); if(remaining<=0){ clearInterval(timerId); submit(); } }
+  // Timer
+  const timeEl = document.getElementById("time");
+  let duration = 20*60;
+  let remaining = duration;
+  let timerId = null;
+  function formatSec(s){ const m = String(Math.floor(s/60)).padStart(2,"0"); const sec = String(s%60).padStart(2,"0"); return m+":"+sec; }
+  function updateTimer(){ timeEl.textContent = formatSec(remaining); }
+  function tick(){ remaining -= 1; updateTimer(); if(remaining<=0){ clearInterval(timerId); submit(); } }
+  function startTimer(){ if(timerId) clearInterval(timerId); remaining = duration; updateTimer(); timerId = setInterval(tick,1000); }
+  document.getElementById("toggle-15").addEventListener("click", ()=>{ duration=15*60; remaining=duration; updateTimer(); });
+  document.getElementById("toggle-20").addEventListener("click", ()=>{ duration=20*60; remaining=duration; updateTimer(); });
 
-  document.getElementById("toggle-15").addEventListener("click",()=>{duration=15*60; remaining=duration; timeEl.textContent=format(remaining);});
-  document.getElementById("toggle-20").addEventListener("click",()=>{duration=20*60; remaining=duration; timeEl.textContent=format(remaining);});
-  document.querySelectorAll("[data-next]")?.forEach(b=>b.addEventListener("click",()=>{ if(current<pages.length-2) show(current+1); }));
-  document.querySelectorAll("[data-prev]")?.forEach(b=>b.addEventListener("click",()=>{ if(current>0) show(current-1); }));
-  window.addEventListener("keydown",(e)=>{ if(e.altKey||e.metaKey){ if(e.key==="ArrowRight") if(current<pages.length-2) show(current+1); if(e.key==="ArrowLeft") if(current>0) show(current-1); } });
+  // Progress
+  const bar = document.getElementById("bar");
+  function setProgress(){ bar.style.width = (current/(pages.length-1))*100 + "%"; }
 
-  const nameInput=document.getElementById("candidate-name"), beginBtn=document.getElementById("begin");
-  nameInput.addEventListener("input",()=>{ beginBtn.disabled = nameInput.value.trim().length<2; });
-  beginBtn.addEventListener("click",()=>{ candidateName=nameInput.value.trim(); show(1); if(timerId) clearInterval(timerId); remaining=duration; timeEl.textContent=format(remaining); timerId=setInterval(tick,1000); });
+  // Navigation
+  function show(i){
+    pages.forEach((id,idx)=> document.getElementById(id)?.classList.toggle("hidden", idx!==i));
+    current = i; setProgress(); window.scrollTo({top:0,behavior:"smooth"});
+  }
+  function next(){ if(current<pages.length-2) show(current+1); }
+  function prev(){ if(current>0) show(current-1); }
+  document.querySelectorAll("[data-next]").forEach(b=>b.addEventListener("click", next));
+  document.querySelectorAll("[data-prev]").forEach(b=>b.addEventListener("click", prev));
+  window.addEventListener("keydown", (e)=>{ if(e.altKey||e.metaKey){ if(e.key==="ArrowRight") next(); if(e.key==="ArrowLeft") prev(); } });
 
+  // Name gate
+  const nameInput = document.getElementById("candidate-name");
+  const beginBtn = document.getElementById("begin");
+  nameInput.addEventListener("input", ()=>{ beginBtn.disabled = nameInput.value.trim().length < 2; });
+  beginBtn.addEventListener("click", ()=>{
+    candidateName = nameInput.value.trim();
+    if(!candidateName) return;
+    show(1); startTimer(); started = true;
+  });
+
+  // Reset / Restart
+  function resetSelections(){ document.querySelectorAll("input[type=radio]").forEach(r=> r.checked=false); }
+  document.getElementById("reset").addEventListener("click", resetSelections);
+  document.getElementById("restart").addEventListener("click", ()=>{ resetSelections(); show(0); clearInterval(timerId); remaining=duration; updateTimer(); started=false; });
+
+  // Submit & Score
+  document.getElementById("submit").addEventListener("click", submit);
   function submit(){
     if(current===pages.length-1) return;
     clearInterval(timerId);
-    const totals=Object.keys(answers).length; let total=0, attempted=0; const secScore={Reading:0,Vocabulary:0,Grammar:0};
-    const rows=[["Question","Correct","Chosen","Section"]];
+
+    const totalItems = Object.keys(answers).length;
+    let total=0, attempted=0;
+    const secScore = {Reading:0, Vocabulary:0, Grammar:0};
+
+    const rows = [];
+    rows.push(["Name", candidateName]);
+    rows.push(["Timestamp", new Date().toISOString()]);
+    rows.push(["Duration_Set_Minutes", (duration/60).toString()]);
+    rows.push([]);
+    rows.push(["Question","Correct","Chosen","Section"]);
+
     for(const qid in answers){
-      const sel=document.querySelector(\`input[name=\${qid}]:checked\`); const chosen=sel?sel.value:""; const correct=answers[qid];
-      if(chosen) attempted++; if(chosen===correct){ total++; secScore[sectionOf[qid]]++; }
-      rows.push([qid.toUpperCase(),correct,chosen,sectionOf[qid]]);
+      const sel = document.querySelector(`input[name=${qid}]:checked`);
+      const chosen = sel ? sel.value : "";
+      const correct = answers[qid];
+      if(chosen) attempted += 1;
+      if(chosen === correct){ total += 1; secScore[sectionOf[qid]] += 1; }
+      rows.push([qid.toUpperCase(), correct, chosen, sectionOf[qid]]);
     }
-    const percent=Math.round((total/totals)*100);
-    document.getElementById("r-name").textContent=candidateName||"(anonymous)";
-    document.getElementById("score").textContent=total; document.getElementById("percent").textContent=String(percent);
-    document.getElementById("by-section").innerHTML=\`
+
+    const percent = Math.round((total/totalItems)*100);
+    document.getElementById("r-name").textContent = candidateName || "(anonymous)";
+    document.getElementById("score").textContent = total;
+    document.getElementById("percent").textContent = String(percent);
+    const by = document.getElementById("by-section");
+    by.innerHTML = `
       <p><strong>By section</strong></p>
       <ul class="muted">
-        <li>Reading: \${secScore.Reading} / \${sectionTotals.Reading}</li>
-        <li>Vocabulary / Use of English: \${secScore.Vocabulary} / \${sectionTotals.Vocabulary}</li>
-        <li>Grammar: \${secScore.Grammar} / \${sectionTotals.Grammar}</li>
+        <li>Reading: ${secScore.Reading} / ${sectionTotals.Reading}</li>
+        <li>Vocabulary / Use of English: ${secScore.Vocabulary} / ${sectionTotals.Vocabulary}</li>
+        <li>Grammar: ${secScore.Grammar} / ${sectionTotals.Grammar}</li>
       </ul>
-      <p class="muted">Attempted: \${attempted} / \${totals}</p>\`;
+      <p class="muted">Attempted: ${attempted} / ${totalItems}</p>
+    `;
 
-    // POST to this same web app (so Sites embed works with no CORS headaches)
-    const payload={
-      name:candidateName,timestamp:new Date().toISOString(),duration_minutes:duration/60,
-      total_items:totals,score:total,percent:percent,section_scores:secScore,English test results:rows.slice(1)
-    };
-    fetch(SHEET_WEBAPP_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).catch(()=>{});
+    // CSV download disabled (per admin request) — nothing saved locally.
+
+    // Send to Google Sheets via Apps Script
+    if(SHEET_WEBAPP_URL){
+      const payload = {
+        name: candidateName,
+        timestamp: new Date().toISOString(),
+        duration_minutes: duration/60,
+        total_items: totalItems,
+        score: total,
+        percent: percent,
+        section_scores: secScore,
+        responses: rows.slice(4) // question rows only
+      };
+      fetch(SHEET_WEBAPP_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      }).catch(err=> console.warn("Send to Google Sheets failed", err));
+    }
+
     show(pages.length-1);
   }
-  document.getElementById("submit")?.addEventListener("click",submit);
-  document.getElementById("reset")?.addEventListener("click",()=>{document.querySelectorAll("input[type=radio]").forEach(r=>r.checked=false);});
-  document.getElementById("restart")?.addEventListener("click",()=>{document.querySelectorAll("input[type=radio]").forEach(r=>r.checked=false); show(0); clearInterval(timerId); remaining=duration; timeEl.textContent=format(remaining);});
-  show(0); timeEl.textContent=format(remaining);
+
+  // Init
+  show(0); setProgress(); updateTimer();
 })();
 </script>
-</body></html>`;
-}
+</body>
+</html>
